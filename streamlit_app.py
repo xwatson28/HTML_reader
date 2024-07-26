@@ -6,10 +6,19 @@ from reportlab.lib.utils import simpleSplit
 import requests
 import os
 import io
+import re
 from PIL import Image
+
+# Function to remove specific text based on regular expression
+def remove_specific_text(html, start_marker, end_marker):
+    pattern = re.compile(re.escape(start_marker) + r".*?" + re.escape(end_marker), re.DOTALL)
+    return pattern.sub('', html)
 
 # Function to extract elements from HTML in order
 def extract_elements_from_html(html):
+    # Remove specific text
+    html = remove_specific_text(html, "** DO NOT REDISTRIBUTE **", "Food for Thought")
+    
     soup = BeautifulSoup(html, 'html.parser')
     elements = []
 
@@ -53,21 +62,23 @@ def download_image(url):
     return None
 
 # Function to resize image to fit within A4 size while maintaining aspect ratio
-def resize_image_to_fit(image_path, max_width, max_height):
+def resize_image_to_fit(image_path, max_width, max_height, text_height, note_height):
     try:
         image = Image.open(image_path)
         original_width, original_height = image.size
         aspect_ratio = original_width / original_height
 
-        if original_width > max_width or original_height > max_height:
+        available_height = max_height - text_height - note_height - 50  # Adjusted for spacing
+
+        if original_width > max_width or original_height > available_height:
             if aspect_ratio > 1:
                 # Wider than tall
                 new_width = max_width
                 new_height = max_width / aspect_ratio
             else:
                 # Taller than wide
-                new_height = max_height
-                new_width = max_height * aspect_ratio
+                new_height = available_height
+                new_width = available_height * aspect_ratio
         else:
             new_width = original_width
             new_height = original_height
@@ -89,20 +100,29 @@ def create_pdf_with_selected_images(selected_images):
     for img_src, relevant_text, note in selected_images:
         local_img_path = download_image(img_src)
         if local_img_path:
-            resized_img_path = resize_image_to_fit(local_img_path, width - 100, height * 0.4)
             text_lines = simpleSplit(relevant_text, 'Helvetica', 12, width - 100)
+            note_lines = simpleSplit(note, 'Helvetica', 10, width - 100)
+            
+            text_height = len(text_lines) * 15
+            note_height = len(note_lines) * 12
+
+            resized_img_path = resize_image_to_fit(local_img_path, width - 100, height * 0.8, text_height, note_height)
+            
             pdf.setFont("Helvetica", 12)
             text_y_position = height - 50
             for line in text_lines:
                 pdf.drawString(50, text_y_position, line)
                 text_y_position -= 15
-            pdf.drawImage(resized_img_path, 50, height * 0.4, width=width - 100, height=height * 0.4, preserveAspectRatio=True, mask='auto')
+
+            img_height = height * 0.8 - text_height - note_height - 50
+            pdf.drawImage(resized_img_path, 50, text_y_position - img_height, width=width - 100, height=img_height, preserveAspectRatio=True, mask='auto')
+
             pdf.setFont("Helvetica", 10)
-            note_lines = simpleSplit(note, 'Helvetica', 10, width - 100)
-            note_y_position = height * 0.35
+            note_y_position = text_y_position - img_height - 12
             for line in note_lines:
                 pdf.drawString(50, note_y_position, line)
                 note_y_position -= 12
+
             pdf.showPage()
 
     pdf.save()
@@ -115,7 +135,7 @@ st.title("HTML Content Selector")
 uploaded_file = st.file_uploader("Upload an HTML file", type=["html"])
 
 if uploaded_file is not None:
-    html_content = uploaded_file.read()
+    html_content = uploaded_file.read().decode('utf-8')
     elements = extract_elements_from_html(html_content)
     elements = remove_duplicate_text(elements)
 
@@ -129,8 +149,8 @@ if uploaded_file is not None:
         if element_type == 'img':
             img_tag = f'<img src="{content}" />'
             st.markdown(img_tag, unsafe_allow_html=True)
-            note = st.text_input(f'Enter your notes for the image {idx}', key=f'note_{idx}')
-            if st.checkbox('Select', key=f'img_{idx}'):
+            note = st.text_input(f'Notes for image {idx}', key=f'note_{idx}')
+            if st.checkbox('Select Image above', key=f'img_{idx}'):
                 relevant_text = ""
                 if i > 0 and elements[i-1][0] == 'text':
                     relevant_text = elements[i-1][1]
@@ -140,15 +160,9 @@ if uploaded_file is not None:
             st.text(content)
 
     if selected_images:
-        if st.button("Generate PDF with selected images"):
-            pdf_buffer = create_pdf_with_selected_images(selected_images)
-            st.download_button("Download PDF", pdf_buffer, "selected_images.pdf", "application/pdf")
-
-        st.write("### Notes for selected images:")
-        for img_src, relevant_text, note in selected_images:
-            st.write(f"Image: {img_src}")
-            st.write(f"Relevant Text: {relevant_text}")
-            st.write(f"Note: {note}")
+        pdf_buffer = create_pdf_with_selected_images(selected_images)
+        st.download_button("Download PDF", pdf_buffer, "selected_images.pdf", "application/pdf")
 
     else:
         st.write("No images selected.")
+
