@@ -1,6 +1,2 @@
 streamlit
 reportlab
-requests
-os
-io
-PIL
