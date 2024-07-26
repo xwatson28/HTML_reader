@@ -1,2 +1,3 @@
 streamlit
 reportlab
+bs4
